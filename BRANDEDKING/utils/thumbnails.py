@@ -74,10 +74,10 @@ async def get_thumb(videoid):
         logo = ImageOps.expand(logo, border=15, fill="white")
         background.paste(logo, (50, 100))
         draw = ImageDraw.Draw(background)
-        font = ImageFont.truetype("Royalqueen/assets/font2.ttf", 40)
-        font2 = ImageFont.truetype("Royalqueen/assets/font2.ttf", 70)
-        arial = ImageFont.truetype("Royalqueen/assets/font2.ttf", 30)
-        name_font = ImageFont.truetype("Royalqueen/assets/font.ttf", 30)
+        font = ImageFont.truetype("BRANDEDKING/assets/font2.ttf", 40)
+        font2 = ImageFont.truetype("BRANDEDKING/assets/font2.ttf", 70)
+        arial = ImageFont.truetype("BRANDEDKING/assets/font2.ttf", 30)
+        name_font = ImageFont.truetype("BRANDEDKING/assets/font.ttf", 30)
         para = textwrap.wrap(title, width=32)
         j = 0
         draw.text(
