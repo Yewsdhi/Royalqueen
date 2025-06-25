@@ -5,8 +5,8 @@ import httpx
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps
 from aiofiles.os import path as aiopath
 
-from BRANDEDKING.helpers import CachedTrack
-from BRANDEDKING.logger import LOGGER
+from src.helpers import CachedTrack
+from src.logger import LOGGER
 
 FONTS = {
     "cfont": ImageFont.truetype("src/modules/utils/cfont.ttf", 15),
