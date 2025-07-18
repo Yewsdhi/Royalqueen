@@ -107,7 +107,7 @@ def draw_text_with_shadow(background, draw, position, text, font, fill, shadow_o
     
     draw.text(position, text, font=font, fill=fill)
 
-async def gen_thumb(videoid: str):
+async def get_thumb(videoid: str):
     try:
         if os.path.isfile(f"cache/{videoid}_v4.png"):
             return f"cache/{videoid}_v4.png"
