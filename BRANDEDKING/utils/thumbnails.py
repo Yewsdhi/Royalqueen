@@ -1,250 +1,608 @@
-# ATLEAST GIVE CREDITS IF YOU STEALING :(((((((((((((((((((((((((((((((((((((
-# ELSE NO FURTHER PUBLIC THUMBNAIL UPDATES
+import aiofiles, aiohttp, base64, json, os, random, re, requests
 
-import random
-import logging
-import os
-import re
-import aiofiles
-import aiohttp
-from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
+from .. import app, bot, call, cdz, console
+from urllib.parse import urlparse
+from io import BytesIO
+
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
+
+from pyrogram import filters
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+from ntgcalls import TelegramServerError
+from pytgcalls.exceptions import NoActiveGroupCall
+from pytgcalls.types import MediaStream
+from pytgcalls.types import AudioQuality, VideoQuality
 from youtubesearchpython.__future__ import VideosSearch
 
-logging.basicConfig(level=logging.INFO)
 
-def changeImageSize(maxWidth, maxHeight, image):
-    widthRatio = maxWidth / image.size[0]
-    heightRatio = maxHeight / image.size[1]
-    newWidth = int(widthRatio * image.size[0])
-    newHeight = int(heightRatio * image.size[1])
-    newImage = image.resize((newWidth, newHeight))
-    return newImage
 
-def truncate(text):
-    list = text.split(" ")
-    text1 = ""
-    text2 = ""    
-    for i in list:
-        if len(text1) + len(i) < 30:        
-            text1 += " " + i
-        elif len(text2) + len(i) < 30:       
-            text2 += " " + i
+def parse_query(query: str) -> str:
+    if bool(re.match(r'^(https?://)?(www\.)?(youtube\.com|youtu\.be)/(?:watch\?v=|embed/|v/|shorts/|live/)?([A-Za-z0-9_-]{11})(?:[?&].*)?$', query)):
+        match = re.search(r'(?:v=|\/(?:embed|v|shorts|live)\/|youtu\.be\/)([A-Za-z0-9_-]{11})', query)
+        if match:
+            return f"https://www.youtube.com/watch?v={match.group(1)}"
+        
+    return query
 
-    text1 = text1.strip()
-    text2 = text2.strip()     
-    return [text1,text2]
+
+
+def parse_tg_link(link: str):
+    parsed = urlparse(link)
+    path = parsed.path.strip('/')
+    parts = path.split('/')
+    
+    if len(parts) >= 2:
+        return str(parts[0]), int(parts[1])
+        
+    return None, None
+
+
+async def fetch_song(query: str):
+    url = "http://82.180.147.88:1470/song"
+    params = {"query": query}
+
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, params=params) as response:
+            if response.status == 200:
+                try:
+                    return await response.json()
+                except Exception:
+                    return {}
+                
+            return {}
+
+def convert_to_seconds(duration: str) -> int:
+    parts = list(map(int, duration.split(":")))
+    total = 0
+    multiplier = 1
+
+    for value in reversed(parts):
+        total += value * multiplier
+        multiplier *= 60
+
+    return total
+
+
+def format_duration(seconds: int) -> str:
+    days = seconds // 86400
+    hours = (seconds % 86400) // 3600
+    minutes = (seconds % 3600) // 60
+    sec = seconds % 60
+
+    parts = []
+    if days > 0:
+        parts.append(f"{days}d")
+    if hours > 0:
+        parts.append(f"{hours}h")
+    if minutes > 0:
+        parts.append(f"{minutes}m")
+    if sec > 0 or not parts:
+        parts.append(f"{sec}s")
+
+    return " ".join(parts)
+
+
+
+def seconds_to_hhmmss(seconds):
+    if seconds < 3600:
+        minutes = seconds // 60
+        sec = seconds % 60
+        return f"{minutes:02}:{sec:02}"
+    else:
+        hours = seconds // 3600
+        minutes = (seconds % 3600) // 60
+        sec = seconds % 60
+        return f"{hours:d}:{minutes:02}:{sec:02}"
+
 
 def random_color():
-    return (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
+    return (random.randint(80, 255), random.randint(80, 255), random.randint(80, 255))
 
-def generate_gradient(width, height, start_color, end_color):
-    base = Image.new('RGBA', (width, height), start_color)
-    top = Image.new('RGBA', (width, height), end_color)
-    mask = Image.new('L', (width, height))
-    mask_data = []
-    for y in range(height):
-        mask_data.extend([int(60 * (y / height))] * width)
-    mask.putdata(mask_data)
-    base.paste(top, (0, 0), mask)
-    return base
 
-def add_border(image, border_width, border_color):
-    width, height = image.size
-    new_width = width + 2 * border_width
-    new_height = height + 2 * border_width
-    new_image = Image.new("RGBA", (new_width, new_height), border_color)
-    new_image.paste(image, (border_width, border_width))
-    return new_image
+def trim_text(draw, text, font, max_width):
+    """Ensure text fits inside max_width, otherwise trim and add '...'"""
+    if not text:
+        return ""
+    original = text
+    while True:
+        bbox = draw.textbbox((0, 0), text, font=font)
+        if bbox[2] - bbox[0] <= max_width:
+            break
+        text = text[:-1]
+    if text != original:
+        while True:
+            bbox = draw.textbbox((0, 0), text + "...", font=font)
+            if bbox[2] - bbox[0] <= max_width or len(text) == 0:
+                break
+            text = text[:-1]
+        text = text + "..."
+    return text
+    
 
-def crop_center_circle(img, output_size, border, border_color, crop_scale=1.5):
-    half_the_width = img.size[0] / 2
-    half_the_height = img.size[1] / 2
-    larger_size = int(output_size * crop_scale)
-    img = img.crop(
-        (
-            half_the_width - larger_size/2,
-            half_the_height - larger_size/2,
-            half_the_width + larger_size/2,
-            half_the_height + larger_size/2
+async def create_music_thumbnail(cover_path, title, artist, duration_seconds=None, output_path="thumbnail.png"):
+    # Handle title/artist
+    if not title or title.strip() == "":
+        title = "Unknown Title"
+    if not artist or artist.strip() == "":
+        artist = "Unknown Artist"
+
+    # Handle time
+    if (
+        duration_seconds is None
+        or duration_seconds == 0
+        or duration_seconds == "live"
+    ):
+        total_time = "Live"
+        tot_sec = None
+    else:
+        tot_sec = duration_seconds
+        total_time = seconds_to_hhmmss(duration_seconds)
+
+    if tot_sec:
+        cur_sec = random.randint(0, tot_sec)
+        current_time = seconds_to_hhmmss(cur_sec)
+    else:
+        cur_sec = random.randint(0, 7200)
+        current_time = seconds_to_hhmmss(cur_sec)
+
+    # Load cover and background
+    cover = Image.open(cover_path).convert("RGBA").resize((500, 500))
+    bg = cover.copy().resize((1280, 720))
+    bg = bg.filter(ImageFilter.GaussianBlur(25))
+
+    # --- Gradient overlay background ---
+    grad_overlay = Image.new("RGBA", bg.size, (0, 0, 0, 0))
+    gdraw = ImageDraw.Draw(grad_overlay)
+    c1, c2 = random_color(), random_color()
+    for i in range(bg.height):
+        r = int(c1[0] + (c2[0]-c1[0]) * (i/bg.height))
+        g = int(c1[1] + (c2[1]-c1[1]) * (i/bg.height))
+        b = int(c1[2] + (c2[2]-c1[2]) * (i/bg.height))
+        gdraw.line([(0, i), (bg.width, i)], fill=(r, g, b, 80))
+    bg = Image.alpha_composite(bg, grad_overlay)
+
+    # --- Glassmorphic Player Card ---
+    card_w, card_h = 700, 380
+    border_thickness = 5  
+
+    # gradient for card border
+    grad = Image.new("RGBA", (card_w + border_thickness*2, card_h + border_thickness*2), (0,0,0,0))
+    gdraw = ImageDraw.Draw(grad)
+    c1, c2 = random_color(), random_color()
+    for i in range(grad.height):
+        r = int(c1[0] + (c2[0]-c1[0]) * (i/grad.height))
+        g = int(c1[1] + (c2[1]-c1[1]) * (i/grad.height))
+        b = int(c1[2] + (c2[2]-c1[2]) * (i/grad.height))
+        gdraw.line([(0, i), (grad.width, i)], fill=(r, g, b))
+
+    mask_outer = Image.new("L", grad.size, 0)
+    mask_inner = Image.new("L", (card_w, card_h), 0)
+    d_outer = ImageDraw.Draw(mask_outer)
+    d_inner = ImageDraw.Draw(mask_inner)
+
+    d_outer.rounded_rectangle([0, 0, grad.width, grad.height], 36, fill=255)
+    d_inner.rounded_rectangle([0, 0, card_w, card_h], 30, fill=255)
+
+    mask_inner_padded = Image.new("L", grad.size, 0)
+    mask_inner_padded.paste(mask_inner, (border_thickness, border_thickness))
+    mask_outer.paste(0, (0,0), mask_inner_padded)
+
+    border = Image.composite(grad, Image.new("RGBA", grad.size, (0,0,0,0)), mask_outer)
+
+    card = Image.new("RGBA", (card_w, card_h), (255, 255, 255, 60))
+    mask_card = Image.new("L", (card_w, card_h), 0)
+    ImageDraw.Draw(mask_card).rounded_rectangle([0,0,card_w,card_h], 30, fill=255)
+
+    card_with_border = border.copy()
+    card_with_border.paste(card, (border_thickness, border_thickness), mask_card)
+
+    # position card CENTER
+    x = (bg.width - card_with_border.width) // 2
+    y = (bg.height - card_with_border.height) // 2
+    bg.paste(card_with_border, (x,y), card_with_border)
+
+    # --- Album cover inside card with gradient border ---
+    cover_size = 200
+    border_size = 6  # thin border
+
+    # Gradient border for cover
+    grad_cover = Image.new("RGBA", (cover_size + border_size*2, cover_size + border_size*2), (0,0,0,0))
+    gdraw = ImageDraw.Draw(grad_cover)
+    c1, c2 = random_color(), random_color()
+    for i in range(grad_cover.height):
+        r = int(c1[0] + (c2[0]-c1[0]) * (i/grad_cover.height))
+        g = int(c1[1] + (c2[1]-c1[1]) * (i/grad_cover.height))
+        b = int(c1[2] + (c2[2]-c1[2]) * (i/grad_cover.height))
+        gdraw.line([(0, i), (grad_cover.width, i)], fill=(r, g, b))
+
+    mask_outer = Image.new("L", grad_cover.size, 0)
+    mask_inner = Image.new("L", (cover_size, cover_size), 0)
+    d_outer = ImageDraw.Draw(mask_outer)
+    d_inner = ImageDraw.Draw(mask_inner)
+
+    d_outer.rounded_rectangle([0,0,grad_cover.width,grad_cover.height], 30, fill=255)
+    d_inner.rounded_rectangle([0,0,cover_size,cover_size], 26, fill=255)
+
+    mask_inner_padded = Image.new("L", grad_cover.size, 0)
+    mask_inner_padded.paste(mask_inner, (border_size, border_size))
+    mask_outer.paste(0, (0,0), mask_inner_padded)
+
+    border_cover = Image.composite(grad_cover, Image.new("RGBA", grad_cover.size, (0,0,0,0)), mask_outer)
+
+    cover_resized = cover.resize((cover_size, cover_size))
+    mask_cover = Image.new("L", (cover_size, cover_size), 0)
+    ImageDraw.Draw(mask_cover).rounded_rectangle([0,0,cover_size,cover_size], 26, fill=255)
+
+    cover_with_border = border_cover.copy()
+    cover_with_border.paste(cover_resized, (border_size, border_size), mask_cover)
+
+    cover_x = x + border_thickness + 30
+    cover_y = y + (card_h - cover_with_border.height)//2 + border_thickness
+    bg.paste(cover_with_border, (cover_x, cover_y), cover_with_border)
+
+    # --- Draw texts and progress bar ---
+    draw = ImageDraw.Draw(bg)
+    font_title = ImageFont.truetype("AdityaHalder/resource/font.ttf", 36)
+    font_artist = ImageFont.truetype("AdityaHalder/resource/font.ttf", 28)
+    font_time = ImageFont.truetype("AdityaHalder/resource/font.ttf", 24)
+
+    max_width = card_w - 300
+    title = trim_text(draw, title, font_title, max_width)
+    artist = trim_text(draw, artist, font_artist, max_width)
+
+    text_x = cover_x + cover_with_border.width + 30
+    draw.text((text_x, y + 86), title, font=font_title, fill="white")
+    draw.text((text_x, y + 146), artist, font=font_artist, fill="white")
+
+    # Progress bar
+    progress_x, progress_y = text_x, y + 206
+    bar_w, bar_h = 380, 8
+    prog_fill = int((cur_sec / tot_sec) * bar_w) if tot_sec else bar_w
+
+    draw.rounded_rectangle([progress_x, progress_y, progress_x + bar_w, progress_y + bar_h],
+                           5, fill=(120, 120, 120, 160))
+
+    c1, c2 = random_color(), random_color()
+    for i in range(prog_fill):
+        r = int(c1[0] + (c2[0]-c1[0]) * (i/max(1, prog_fill)))
+        g = int(c1[1] + (c2[1]-c1[1]) * (i/max(1, prog_fill)))
+        b = int(c1[2] + (c2[2]-c1[2]) * (i/max(1, prog_fill)))
+        draw.line([(progress_x + i, progress_y), (progress_x + i, progress_y + bar_h)], fill=(r,g,b))
+
+    knob_x = progress_x + prog_fill
+    knob_y = progress_y + bar_h // 2
+    draw.ellipse([knob_x - 6, knob_y - 6, knob_x + 6, knob_y + 6], fill="white", outline="black", width=2)
+
+    draw.text((progress_x, progress_y + 15), current_time, font=font_time, fill="white")
+    total_bbox = draw.textbbox((0, 0), total_time, font=font_time)
+    total_x = progress_x + bar_w - (total_bbox[2] - total_bbox[0])
+    draw.text((total_x, progress_y + 15), total_time, font=font_time, fill="red" if total_time == "Live" else "white")
+
+    # Controls (with repeat moved before back)
+    controls_y = progress_y + 70
+    num_icons = 7
+    step = bar_w // (num_icons - 1)
+    icon_positions = [progress_x + i*step for i in range(num_icons)]
+
+    # shuffle
+    shuffle_x = icon_positions[0]
+    draw.line([(shuffle_x-12, controls_y-8), (shuffle_x+8, controls_y+12)], fill=(0,255,120), width=3)
+    draw.polygon([(shuffle_x+8, controls_y+12), (shuffle_x+16, controls_y+6), (shuffle_x+2, controls_y+4)], fill=(0,255,120))
+    draw.line([(shuffle_x-12, controls_y+8), (shuffle_x-2, controls_y-2)], fill=(0,255,120), width=3)
+
+    # repeat (bright yellow)
+    repeat_x = icon_positions[1]
+    repeat_color = (255, 220, 50)
+    draw.arc([repeat_x-14, controls_y-12, repeat_x+14, controls_y+12], start=30, end=300, fill=repeat_color, width=3)
+    draw.polygon([(repeat_x+14, controls_y-2), (repeat_x+22, controls_y-6), (repeat_x+14, controls_y-10)], fill=repeat_color)
+
+    # back
+    sbx = icon_positions[2]
+    draw.polygon([(sbx+10, controls_y-10), (sbx+10, controls_y+10), (sbx-12, controls_y)], fill="white")
+    draw.rectangle([sbx+14, controls_y-10, sbx+18, controls_y+10], fill="white")
+
+    # pause
+    center_x = icon_positions[3]
+    bar_wid, bar_height = 6, 26
+    gap = 10
+    draw.rectangle([center_x-gap-bar_wid, controls_y-bar_height//2, center_x-gap, controls_y+bar_height//2], fill="white")
+    draw.rectangle([center_x+gap, controls_y-bar_height//2, center_x+gap+bar_wid, controls_y+bar_height//2], fill="white")
+
+    # forward
+    sfx = icon_positions[4]
+    draw.polygon([(sfx-10, controls_y-10), (sfx-10, controls_y+10), (sfx+12, controls_y)], fill="white")
+    draw.rectangle([sfx-18, controls_y-10, sfx-14, controls_y+10], fill="white")
+
+    # heart
+    fav_x = icon_positions[5]
+    heart = [(fav_x, controls_y), (fav_x-10, controls_y-10), (fav_x-20, controls_y), (fav_x, controls_y+14),
+             (fav_x+20, controls_y), (fav_x+10, controls_y-10)]
+    draw.polygon(heart, fill="red")
+
+    # earphone
+    ear_x = icon_positions[6]
+    draw.arc([ear_x-20, controls_y-20, ear_x+20, controls_y+20], start=200, end=-20, fill="white", width=3)
+    draw.rectangle([ear_x-18, controls_y-4, ear_x-10, controls_y+12], fill="white")
+    draw.rectangle([ear_x+10, controls_y-4, ear_x+18, controls_y+12], fill="white")
+
+    bg.save(output_path)
+    return output_path
+
+
+async def generate_thumbnail(url: str) -> str:
+    try:
+        filename = os.path.join("cache", f"thumbnail_{hash(url)}.jpg")
+        parsed = urlparse(url)
+
+        if parsed.scheme in ("http", "https"):
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as resp:
+                    if resp.status != 200:
+                        return ""
+                    data = await resp.read()
+
+                    with Image.open(BytesIO(data)) as img:
+                        img = img.resize((1280, 720))
+                        buf = BytesIO()
+                        img.save(buf, format="JPEG", quality=90)
+                        buf.seek(0)
+
+                        async with aiofiles.open(filename, "wb") as f:
+                            await f.write(buf.read())
+
+        else:
+            if not os.path.isfile(url):
+                return "AdityaHalder/rsource/thumbnail.png"
+
+            with Image.open(url) as img:
+                img = img.resize((1280, 720))
+                buf = BytesIO()
+                img.save(buf, format="JPEG", quality=90)
+                buf.seek(0)
+
+                async with aiofiles.open(filename, "wb") as f:
+                    await f.write(buf.read())
+
+        return filename
+
+    except Exception:
+        return "AdityaHalder/rsource/thumbnail.png"
+
+
+async def make_thumbnail(image, title, channel, duration, output):
+    return await create_music_thumbnail(image, title, channel, duration, output)
+
+
+
+
+@bot.on_message(cdz(["play", "vplay"]) & ~filters.private)
+async def start_stream_in_vc(client, message):
+    try:
+        await message.delete()
+    except Exception:
+        pass
+    chat_id = message.chat.id
+    mention = (
+        message.from_user.mention
+        if message.from_user else
+        f"[Anonymous User](https://t.me/{bot.username})"
+    )
+    replied = message.reply_to_message
+    audio_telegram = replied.audio or replied.voice if replied else None
+    video_telegram = replied.video or replied.document if replied else None
+    
+    if audio_telegram or video_telegram:
+        return await message.reply_text(
+            "**🥺 Sorry, I Can't Stream Telegram Media Files Right Now.**"
+        )
+    else:
+        if len(message.command) < 2:
+            return await message.reply_text(
+                f"""
+**🥀 Give Me Some Query To
+Stream Audio Or Video❗...
+
+ℹ️ Example:
+≽ Audio: `/play yalgaar`
+≽ Video: `/vplay yalgaar`**"""
+            )
+        query = parse_query(" ".join(message.command[1:]))
+        try:
+            aux =  await message.reply_text("**🔄 Processing ✨...**")
+        except Exception:
+            pass
+        video_stream = True if message.command[0].startswith("v") else False
+
+        search = VideosSearch(query, limit=1)
+        result = (await search.next())["result"]
+
+        if not result:
+            try:
+                return await aux.edit("❌ No results found.")
+            except Exception:
+                return
+
+        video = result[0]
+        full_title = video["title"]
+        title = full_title[:30]
+        id = video["id"]
+        duration = video["duration"]
+        if not duration:
+            try:
+                return await aux.edit("❌ I can't stream live-stream right now.")
+            except Exception:
+                return
+        duration_sec = convert_to_seconds(duration)
+        duration_mins = format_duration(duration_sec)
+        views = video["viewCount"]["short"]
+        image_path = video["thumbnails"][0]["url"].split("?")[0]
+        channellink = video["channel"]["link"]
+        channel = video["channel"]["name"]
+        link = video["link"]
+        xyz = os.path.join("downloads", f"{id}.mp3")
+        if not os.path.exists(xyz):
+            song_data = await fetch_song(id)
+            if not song_data:
+                try:
+                    return await aux.edit("❌ Failed to process query, please try again.")
+                except Exception:
+                    return
+            song_url = song_data["link"]
+            
+            c_username, message_id = parse_tg_link(song_url)
+            msg = await client.get_messages(c_username, message_id)
+            try:
+                try:
+                    await aux.edit("**⬇️ Downloading ✨...**")
+                except Exception:
+                    pass
+                await msg.download(file_name=xyz)
+            except Exception:
+                try:
+                    return await aux.edit("❌ Failed to download, please try again.")
+                except Exception:
+                    return
+                    
+            while not os.path.exists(xyz):
+                await asyncio.sleep(0.5)
+                
+        file_path = xyz
+
+    
+    media_stream = (
+        MediaStream(
+            media_path=file_path,
+            video_flags=MediaStream.Flags.IGNORE,
+            audio_parameters=AudioQuality.STUDIO,
+        )
+        if not video_stream
+        else MediaStream(
+            media_path=file_path,
+            audio_parameters=AudioQuality.STUDIO,
+            video_parameters=VideoQuality.HD_720p,
         )
     )
     
-    img = img.resize((output_size - 2*border, output_size - 2*border))
-    
-    
-    final_img = Image.new("RGBA", (output_size, output_size), border_color)
-    
-    
-    mask_main = Image.new("L", (output_size - 2*border, output_size - 2*border), 0)
-    draw_main = ImageDraw.Draw(mask_main)
-    draw_main.ellipse((0, 0, output_size - 2*border, output_size - 2*border), fill=255)
-    
-    final_img.paste(img, (border, border), mask_main)
-    
-    
-    mask_border = Image.new("L", (output_size, output_size), 0)
-    draw_border = ImageDraw.Draw(mask_border)
-    draw_border.ellipse((0, 0, output_size, output_size), fill=255)
-    
-    result = Image.composite(final_img, Image.new("RGBA", final_img.size, (0, 0, 0, 0)), mask_border)
-    
-    return result
+    if chat_id not in call.queue:
+        try:
+            try:
+                await call.start_stream(chat_id, media_stream)
+            except NoActiveGroupCall:
+                try:
+                    return await aux.edit("❌ No active vc found to stream.")
+                except Exception:
+                    return
+            except TelegramServerError:
+                try:
+                    return await aux.edit(
+                        "⚠️**Telegram server error!**\nPlease try again shortly."
+                    )
+                except Exception:
+                    return
+        except Exception as e:
+            try:
+                return await aux.edit(
+                    f"❌ **Failed to stream**❗\n\n`{e}`"
+                )
+            except Exception:
+                return
 
-def draw_text_with_shadow(background, draw, position, text, font, fill, shadow_offset=(3, 3), shadow_blur=5):
-    
-    shadow = Image.new('RGBA', background.size, (0, 0, 0, 0))
-    shadow_draw = ImageDraw.Draw(shadow)
-    
-    
-    shadow_draw.text(position, text, font=font, fill="black")
-    
-    
-    shadow = shadow.filter(ImageFilter.GaussianBlur(radius=shadow_blur))
-    
-    
-    background.paste(shadow, shadow_offset, shadow)
-    
-    
-    draw.text(position, text, font=font, fill=fill)
-
-async def get_thumb(videoid: str):
+    image_file = await generate_thumbnail(image_path)
+    thumbnail = await make_thumbnail(
+        image_file, full_title, channel, duration_sec, f"cache/{chat_id}_{id}_{message.id}.png"
+    )
+        
     try:
-        if os.path.isfile(f"cache/{videoid}_v4.png"):
-            return f"cache/{videoid}_v4.png"
-
-        url = f"https://www.youtube.com/watch?v={videoid}"
-        results = VideosSearch(url, limit=1)
-        for result in (await results.next())["result"]:
-            title = result.get("title")
-            if title:
-                title = re.sub("\W+", " ", title).title()
-            else:
-                title = "Unsupported Title"
-            duration = result.get("duration")
-            if not duration:
-                duration = "Live"
-            thumbnail_data = result.get("thumbnails")
-            if thumbnail_data:
-                thumbnail = thumbnail_data[0]["url"].split("?")[0]
-            else:
-                thumbnail = None
-            views_data = result.get("viewCount")
-            if views_data:
-                views = views_data.get("short")
-                if not views:
-                    views = "Unknown Views"
-            else:
-                views = "Unknown Views"
-            channel_data = result.get("channel")
-            if channel_data:
-                channel = channel_data.get("name")
-                if not channel:
-                    channel = "Unknown Channel"
-            else:
-                channel = "Unknown Channel"
-
+        await aux.delete()
+    except:
+        pass
         
-        async with aiohttp.ClientSession() as session:
-            async with session.get(thumbnail) as resp:
-        
-                content = await resp.read()
-                if resp.status == 200:
-                    content_type = resp.headers.get('Content-Type')
-                    if 'jpeg' in content_type or 'jpg' in content_type:
-                        extension = 'jpg'
-                    elif 'png' in content_type:
-                        extension = 'png'
-                    else:
-                        logging.error(f"Unexpected content type: {content_type}")
-                        return None
+    pos = await call.add_to_queue(chat_id, media_stream, title, duration_mins, thumbnail, mention)
+    status = (
+        "✅ **Started Streaming in VC.**"
+        if pos == 0
+        else f"✅ **Added To Queue At: #{pos}**"
+    )
+    caption = f"""
+{status}
 
-                    filepath = f"cache/thumb{videoid}.png"
-                    f = await aiofiles.open(filepath, mode="wb")
-                    await f.write(await resp.read())
-                    await f.close()
-                    # os.system(f"file {filepath}")
-                    
-        
-        image_path = f"cache/thumb{videoid}.png"
-        youtube = Image.open(image_path)
-        image1 = changeImageSize(1280, 720, youtube)
-        
-        image2 = image1.convert("RGBA")
-        background = image2.filter(filter=ImageFilter.BoxBlur(20))
-        enhancer = ImageEnhance.Brightness(background)
-        background = enhancer.enhance(0.6)
-
-        
-        start_gradient_color = random_color()
-        end_gradient_color = random_color()
-        gradient_image = generate_gradient(1280, 720, start_gradient_color, end_gradient_color)
-        background = Image.blend(background, gradient_image, alpha=0.2)
-        
-        draw = ImageDraw.Draw(background)
-        arial = ImageFont.truetype("BRANDEDKING/assets/font2.ttf", 30)
-        font = ImageFont.truetype("BRANDEDKING/assets/font.ttf", 30)
-        title_font = ImageFont.truetype("BRANDEDKING/assets/font3.ttf", 45)
-
-
-        circle_thumbnail = crop_center_circle(youtube, 400, 20, start_gradient_color)
-        circle_thumbnail = circle_thumbnail.resize((400, 400))
-        circle_position = (120, 160)
-        background.paste(circle_thumbnail, circle_position, circle_thumbnail)
-
-        text_x_position = 565
-        title1 = truncate(title)
-        draw_text_with_shadow(background, draw, (text_x_position, 180), title1[0], title_font, (255, 255, 255))
-        draw_text_with_shadow(background, draw, (text_x_position, 230), title1[1], title_font, (255, 255, 255))
-        draw_text_with_shadow(background, draw, (text_x_position, 320), f"{channel}  |  {views[:23]}", arial, (255, 255, 255))
-
-
-        line_length = 580  
-        line_color = (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
-
-        if duration != "Live":
-            color_line_percentage = random.uniform(0.15, 0.85)
-            color_line_length = int(line_length * color_line_percentage)
-            white_line_length = line_length - color_line_length
-
-            start_point_color = (text_x_position, 380)
-            end_point_color = (text_x_position + color_line_length, 380)
-            draw.line([start_point_color, end_point_color], fill=line_color, width=9)
-        
-            start_point_white = (text_x_position + color_line_length, 380)
-            end_point_white = (text_x_position + line_length, 380)
-            draw.line([start_point_white, end_point_white], fill="white", width=8)
-        
-            circle_radius = 10 
-            circle_position = (end_point_color[0], end_point_color[1])
-            draw.ellipse([circle_position[0] - circle_radius, circle_position[1] - circle_radius,
-                      circle_position[0] + circle_radius, circle_position[1] + circle_radius], fill=line_color)
-    
-        else:
-            line_color = (255, 0, 0)
-            start_point_color = (text_x_position, 380)
-            end_point_color = (text_x_position + line_length, 380)
-            draw.line([start_point_color, end_point_color], fill=line_color, width=9)
-        
-            circle_radius = 10 
-            circle_position = (end_point_color[0], end_point_color[1])
-            draw.ellipse([circle_position[0] - circle_radius, circle_position[1] - circle_radius,
-                          circle_position[0] + circle_radius, circle_position[1] + circle_radius], fill=line_color)
-
-        draw_text_with_shadow(background, draw, (text_x_position, 400), "00:00", arial, (255, 255, 255))
-        draw_text_with_shadow(background, draw, (1080, 400), duration, arial, (255, 255, 255))
-        
-        play_icons = Image.open("BRANDEDKING/assets/play_icons.png")
-        play_icons = play_icons.resize((580, 62))
-        background.paste(play_icons, (text_x_position, 450), play_icons)
-
-        os.remove(f"cache/thumb{videoid}.png")
-
-        background_path = f"cache/{videoid}_v4.png"
-        background.save(background_path)
-        
-        return background_path
-
+**❍ Title:** [{title}...]({link})
+**❍ Duration:** {duration_mins}
+**❍ Requested By:** {mention}"""
+    buttons = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    text="🗑️ Close",
+                    callback_data="close",
+                ),
+            ]
+        ]
+    )
+    try:
+        await message.reply_photo(photo=thumbnail, caption=caption, has_spoiler=True, reply_markup=buttons)
     except Exception as e:
-        logging.error(f"Error generating thumbnail for video {videoid}: {e}")
-        traceback.print_exc()
-        return None
+        pass
+
+    if chat_id != console.LOG_GROUP_ID:
+        try:
+            chat_name = message.chat.title
+            if message.chat.username:
+                chat_link = f"@{message.chat.username}"
+            elif chat_id in console.chat_links:
+                clink = console.chat_links[chat_id]
+                chat_link = f"[Private Chat]({clink})"
+            else:
+                try:
+                    new_link = await client.export_chat_invite_link(chat_id)
+                    console.chat_links[chat_id] = new_link
+                    chat_link = f"[Private Chat]({new_link})"
+                except Exception:
+                    chat_link = "N/A"
+        
+
+            if message.from_user:
+                if message.from_user.username:
+                    req_user = f"@{message.from_user.username}"
+                else:
+                    req_user = message.from_user.mention
+                user_id = message.from_user.id
+            elif message.sender_chat:
+                if message.sender_chat.username:
+                    req_user = f"@{message.sender_chat.username}"
+                else:
+                    req_user = message.sender_chat.title
+                user_id = message.sender_chat.id
+            else:
+                req_user = "Anonymous User"
+                user_id = "N/A"
+
+            stream_type = "Audio" if not video_stream else "Video"
+
+            log_message = f"""
+🎉 **{mention} Just Played A Song.**
+
+📍 **Chat:** {chat_name}
+💬 **Chat Link:** {chat_link}
+♂️ **Chat ID:** {chat_id}
+👤 **Requested By:** {req_user}
+🆔 **User ID:** `{user_id}`
+🔎 **Query:** {query}
+🎶 **Title:** [{title}...]({link})
+⏱️ **Duration:** {duration_mins}
+📡 **Stream Type:** {stream_type}"""
+            await bot.send_photo(console.LOG_GROUP_ID, photo=thumbnail, caption=log_message)
+        except Exception:
+            pass
+
+
+
+
+
+
+
+
+
+
+
