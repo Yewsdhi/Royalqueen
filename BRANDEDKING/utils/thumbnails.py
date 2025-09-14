@@ -1,133 +1,217 @@
+# Copyright (c) 2025 Nand Yaduwanshi <NoxxOP>
+# Location: Supaul, Bihar
+#
+# All rights reserved.
+#
+# This code is the intellectual property of Nand Yaduwanshi.
+# You are not allowed to copy, modify, redistribute, or use this
+# code for commercial or personal projects without explicit permission.
+#
+# Allowed:
+# - Forking for personal learning
+# - Submitting improvements via pull requests
+#
+# Not Allowed:
+# - Claiming this code as your own
+# - Re-uploading without credit or permission
+# - Selling or using commercially
+#
+# Contact for permissions:
+# Email: badboy809075@gmail.com
+#
+# ATLEAST GIVE CREDITS IF YOU STEALING :
+# ELSE NO FURTHER PUBLIC THUMBNAIL UPDATES
+
 import os
-import re
-import aiofiles
 import aiohttp
-from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
+import aiofiles
+import traceback
+from pathlib import Path
+from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageEnhance
 from youtubesearchpython.__future__ import VideosSearch
-from config import YOUTUBE_IMG_URL
 
-# Constants
-CACHE_DIR = "cache"
-os.makedirs(CACHE_DIR, exist_ok=True)
+CACHE_DIR = Path("cache")
+CACHE_DIR.mkdir(exist_ok=True)
 
-PANEL_W, PANEL_H = 763, 545
-PANEL_X = (1280 - PANEL_W) // 2
-PANEL_Y = 88
-TRANSPARENCY = 170
-INNER_OFFSET = 36
+CANVAS_W, CANVAS_H = 1320, 760
+BG_BLUR = 16
+BG_BRIGHTNESS = 1  
 
-THUMB_W, THUMB_H = 542, 273
-THUMB_X = PANEL_X + (PANEL_W - THUMB_W) // 2
-THUMB_Y = PANEL_Y + INNER_OFFSET
+LIME_BORDER = (158, 255, 49, 255)
+RING_COLOR  = (98, 193, 169, 255)
+TEXT_WHITE  = (245, 245, 245, 255)
+TEXT_SOFT   = (230, 230, 230, 255)
+TEXT_SHADOW = (0, 0, 0, 140)
 
-TITLE_X = 377
-META_X = 377
-TITLE_Y = THUMB_Y + THUMB_H + 10
-META_Y = TITLE_Y + 45
+# Font paths
+FONT_REGULAR_PATH = "ShrutiMusic/assets/font2.ttf"
+FONT_BOLD_PATH    = "ShrutiMusic/assets/font3.ttf"
 
-BAR_X, BAR_Y = 388, META_Y + 45
-BAR_RED_LEN = 280
-BAR_TOTAL_LEN = 480
+# Default small-size loaded fonts (can reuse directly)
+FONT_REGULAR = ImageFont.truetype(FONT_REGULAR_PATH, 30)
+FONT_BOLD    = ImageFont.truetype(FONT_BOLD_PATH, 30)
 
-ICONS_W, ICONS_H = 415, 45
-ICONS_X = PANEL_X + (PANEL_W - ICONS_W) // 2
-ICONS_Y = BAR_Y + 48
 
-MAX_TITLE_WIDTH = 580
+def change_image_size(max_w, max_h, image):
+    ratio = min(max_w / image.size[0], max_h / image.size[1])
+    return image.resize((int(image.size[0]*ratio), int(image.size[1]*ratio)), Image.LANCZOS)
 
-def trim_to_width(text: str, font: ImageFont.FreeTypeFont, max_w: int) -> str:
-    ellipsis = "…"
-    if font.getlength(text) <= max_w:
-        return text
-    for i in range(len(text) - 1, 0, -1):
-        if font.getlength(text[:i] + ellipsis) <= max_w:
-            return text[:i] + ellipsis
-    return ellipsis
 
-async def get_thumb(videoid: str):
-    cache_path = os.path.join(CACHE_DIR, f"{videoid}_v4.png")
-    if os.path.exists(cache_path):
-        return cache_path
+def wrap_two_lines(draw, text, font, max_width):
+    words = text.split()
+    line1, line2 = "", ""
+    for w in words:
+        test = (line1 + " " + w).strip()
+        if draw.textlength(test, font=font) <= max_width:
+            line1 = test
+        else:
+            break
+    remaining = text[len(line1):].strip()
+    if remaining:
+        for w in remaining.split():
+            test = (line2 + " " + w).strip()
+            if draw.textlength(test, font=font) <= max_width:
+                line2 = test
+            else:
+                break
+    return (line1 + ("\n" + line2 if line2 else "")).strip()
 
-    # YouTube video data fetch
-    results = VideosSearch(f"https://www.youtube.com/watch?v={videoid}", limit=1)
+
+def fit_title_two_lines(draw, text, max_width, font_path, start_size=58, min_size=30):
+    size = start_size
+    while size >= min_size:
+        try:
+            f = ImageFont.truetype(font_path, size)
+        except:
+            size -= 1
+            continue
+        wrapped = wrap_two_lines(draw, text, f, max_width)
+        lines = wrapped.split("\n")
+        if len(lines) <= 2 and all(draw.textlength(l, font=f) <= max_width for l in lines):
+            return f, wrapped
+        size -= 1
+    f = ImageFont.truetype(font_path, min_size)
+    return f, wrap_two_lines(draw, text, f, max_width)
+
+
+async def gen_thumb(videoid: str):
+    url = f"https://www.youtube.com/watch?v={videoid}"
     try:
-        results_data = await results.next()
-        result_items = results_data.get("result", [])
-        if not result_items:
-            raise ValueError("No results found.")
-        data = result_items[0]
-        title = re.sub(r"\W+", " ", data.get("title", "Unsupported Title")).title()
-        thumbnail = data.get("thumbnails", [{}])[0].get("url", YOUTUBE_IMG_URL)
-        duration = data.get("duration")
-        views = data.get("viewCount", {}).get("short", "Unknown Views")
-    except Exception:
-        title, thumbnail, duration, views = "Unsupported Title", YOUTUBE_IMG_URL, None, "Unknown Views"
+        results = VideosSearch(url, limit=1)
+        result = (await results.next())["result"][0]
 
-    is_live = not duration or str(duration).strip().lower() in {"", "live", "live now"}
-    duration_text = "Live" if is_live else duration or "Unknown Mins"
+        title    = result.get("title", "Unknown Title")
+        duration = result.get("duration", "Unknown")
+        thumburl = result["thumbnails"][0]["url"].split("?")[0]
+        views    = result.get("viewCount", {}).get("short", "Unknown Views")
+        channel  = result.get("channel", {}).get("name", "Unknown Channel")
 
-    # Download thumbnail
-    thumb_path = os.path.join(CACHE_DIR, f"thumb{videoid}.png")
-    try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(thumbnail) as resp:
+            async with session.get(thumburl) as resp:
                 if resp.status == 200:
+                    thumb_path = CACHE_DIR / f"thumb{videoid}.png"
                     async with aiofiles.open(thumb_path, "wb") as f:
                         await f.write(await resp.read())
-    except Exception:
-        return YOUTUBE_IMG_URL
 
-    # Create base image
-    base = Image.open(thumb_path).resize((1280, 720)).convert("RGBA")
-    bg = ImageEnhance.Brightness(base.filter(ImageFilter.BoxBlur(10))).enhance(0.6)
+        base_img = Image.open(thumb_path).convert("RGBA")
 
-    # Frosted glass panel
-    panel_area = bg.crop((PANEL_X, PANEL_Y, PANEL_X + PANEL_W, PANEL_Y + PANEL_H))
-    overlay = Image.new("RGBA", (PANEL_W, PANEL_H), (255, 255, 255, TRANSPARENCY))
-    frosted = Image.alpha_composite(panel_area, overlay)
-    mask = Image.new("L", (PANEL_W, PANEL_H), 0)
-    ImageDraw.Draw(mask).rounded_rectangle((0, 0, PANEL_W, PANEL_H), 50, fill=255)
-    bg.paste(frosted, (PANEL_X, PANEL_Y), mask)
+        # Background
+        bg = change_image_size(CANVAS_W, CANVAS_H, base_img).convert("RGBA")
+        bg = bg.filter(ImageFilter.GaussianBlur(BG_BLUR))
+        bg = ImageEnhance.Brightness(bg).enhance(BG_BRIGHTNESS)
 
-    # Draw details
-    draw = ImageDraw.Draw(bg)
-    try:
-        title_font = ImageFont.truetype("BRANDEDKING/assets/font2.ttf", 32)
-        regular_font = ImageFont.truetype("BRANDEDKING/assets/font.ttf", 18)
-    except OSError:
-        title_font = regular_font = ImageFont.load_default()
+        canvas = Image.new("RGBA", (CANVAS_W, CANVAS_H), (0, 0, 0, 255))
+        canvas.paste(bg, (0, 0))
+        draw = ImageDraw.Draw(canvas)
 
-    thumb = base.resize((THUMB_W, THUMB_H))
-    tmask = Image.new("L", thumb.size, 0)
-    ImageDraw.Draw(tmask).rounded_rectangle((0, 0, THUMB_W, THUMB_H), 20, fill=255)
-    bg.paste(thumb, (THUMB_X, THUMB_Y), tmask)
+        # outer lime frame
+        frame_inset = 12
+        draw.rectangle(
+            [frame_inset//2, frame_inset//2, CANVAS_W - frame_inset//2, CANVAS_H - frame_inset//2],
+            outline=LIME_BORDER, width=frame_inset
+        )
 
-    draw.text((TITLE_X, TITLE_Y), trim_to_width(title, title_font, MAX_TITLE_WIDTH), fill="black", font=title_font)
-    draw.text((META_X, META_Y), f"YouTube | {views}", fill="black", font=regular_font)
+        # circular artwork
+        thumb_size = 470
+        ring_width = 20
+        circle_x = 92
+        circle_y = (CANVAS_H - thumb_size) // 2
 
-    # Progress bar
-    draw.line([(BAR_X, BAR_Y), (BAR_X + BAR_RED_LEN, BAR_Y)], fill="red", width=6)
-    draw.line([(BAR_X + BAR_RED_LEN, BAR_Y), (BAR_X + BAR_TOTAL_LEN, BAR_Y)], fill="gray", width=5)
-    draw.ellipse([(BAR_X + BAR_RED_LEN - 7, BAR_Y - 7), (BAR_X + BAR_RED_LEN + 7, BAR_Y + 7)], fill="red")
+        circular_mask = Image.new("L", (thumb_size, thumb_size), 0)
+        mdraw = ImageDraw.Draw(circular_mask)
+        mdraw.ellipse((0, 0, thumb_size, thumb_size), fill=255)
 
-    draw.text((BAR_X, BAR_Y + 15), "00:00", fill="black", font=regular_font)
-    end_text = "Live" if is_live else duration_text
-    draw.text((BAR_X + BAR_TOTAL_LEN - (90 if is_live else 60), BAR_Y + 15), end_text, fill="red" if is_live else "black", font=regular_font)
+        art = base_img.resize((thumb_size, thumb_size))
+        art.putalpha(circular_mask)
 
-    # Icons
-    icons_path = "BRANDEDKING/assets/play_icons.png"
-    if os.path.isfile(icons_path):
-        ic = Image.open(icons_path).resize((ICONS_W, ICONS_H)).convert("RGBA")
-        r, g, b, a = ic.split()
-        black_ic = Image.merge("RGBA", (r.point(lambda *_: 0), g.point(lambda *_: 0), b.point(lambda *_: 0), a))
-        bg.paste(black_ic, (ICONS_X, ICONS_Y), black_ic)
+        ring_size = thumb_size + ring_width * 2
+        ring_img = Image.new("RGBA", (ring_size, ring_size), (0, 0, 0, 0))
+        rdraw = ImageDraw.Draw(ring_img)
+        ring_bbox = (ring_width//2, ring_width//2, ring_size - ring_width//2, ring_size - ring_width//2)
+        rdraw.ellipse(ring_bbox, outline=RING_COLOR, width=ring_width)
 
-    # Cleanup and save
-    try:
-        os.remove(thumb_path)
-    except OSError:
-        pass
+        canvas.paste(ring_img, (circle_x - ring_width, circle_y - ring_width), ring_img)
+        canvas.paste(art, (circle_x, circle_y), art)
 
-    bg.save(cache_path)
-    return cache_path
+        # top-left label
+        tl_font = ImageFont.truetype(FONT_BOLD_PATH, 34)
+        draw.text((28+1, 18+1), "ShrutiMusic", fill=TEXT_SHADOW, font=tl_font)
+        draw.text((28, 18), "ShrutiMusic", fill=TEXT_WHITE, font=tl_font)
+
+        # right text block
+        info_x = circle_x + thumb_size + 60
+        max_text_w = CANVAS_W - info_x - 48
+
+        # NOW PLAYING
+        np_font = ImageFont.truetype(FONT_BOLD_PATH, 60)
+        np_text = "NOW PLAYING"
+        np_w = draw.textlength(np_text, font=np_font)
+        np_x = info_x + (max_text_w - np_w) // 2 - 95
+        np_y = circle_y + 30  
+        draw.text((np_x+2, np_y+2), np_text, fill=TEXT_SHADOW, font=np_font)
+        draw.text((np_x, np_y), np_text, fill=TEXT_WHITE, font=np_font)
+
+        # TITLE
+        title_font, title_wrapped = fit_title_two_lines(draw, title, max_text_w, FONT_BOLD_PATH, start_size=30, min_size=30)
+        title_y = np_y + 110   
+        draw.multiline_text((info_x+2, title_y+2), title_wrapped, fill=TEXT_SHADOW, font=title_font, spacing=8)
+        draw.multiline_text((info_x, title_y),     title_wrapped, fill=TEXT_WHITE,  font=title_font, spacing=8)
+
+        # Meta lines
+        meta_font = ImageFont.truetype(FONT_REGULAR_PATH, 30)
+        line_gap = 46
+        meta_start_y = title_y + 130  
+        duration_label = duration
+        if duration and ":" in duration and "Min" not in duration and "min" not in duration:
+            duration_label = f"{duration} Mins"
+
+        def draw_meta(y, text):
+            draw.text((info_x+1, y+1), text, fill=TEXT_SHADOW, font=meta_font)
+            draw.text((info_x,   y),   text, fill=TEXT_SOFT,  font=meta_font)
+
+        draw_meta(meta_start_y + 0 * line_gap, f"Views : {views}")
+        draw_meta(meta_start_y + 1 * line_gap, f"Duration : {duration_label}")
+        draw_meta(meta_start_y + 2 * line_gap, f"Channel : {channel}")
+
+        out = CACHE_DIR / f"{videoid}_styled.png"
+        canvas.save(out)
+
+        try:
+            os.remove(thumb_path)
+        except:
+            pass
+
+        return str(out)
+
+    except Exception as e:
+        print(f"[gen_thumb Error] {e}")
+        traceback.print_exc()
+        return None
+
+
+# ©️ Copyright Reserved - @NoxxOP  Nand Yaduwanshi
+# ===========================================
+# ©️ 2025 Nand Yaduwanshi (aka @NoxxOP)
+# 🔗 GitHub : https://github.com/NoxxOP/ShrutiMusic
+# 📢 Telegram Channel : https://t.me/ShrutiBots
+# ===========================================
