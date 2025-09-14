@@ -44,8 +44,8 @@ TEXT_SOFT   = (230, 230, 230, 255)
 TEXT_SHADOW = (0, 0, 0, 140)
 
 # Font paths
-FONT_REGULAR_PATH = "ShrutiMusic/assets/font2.ttf"
-FONT_BOLD_PATH    = "ShrutiMusic/assets/font3.ttf"
+FONT_REGULAR_PATH = "BRANDEDKING/assets/font2.ttf"
+FONT_BOLD_PATH    = "BRANDEDKING/assets/font3.ttf"
 
 # Default small-size loaded fonts (can reuse directly)
 FONT_REGULAR = ImageFont.truetype(FONT_REGULAR_PATH, 30)
