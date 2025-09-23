@@ -7,7 +7,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance, ImageOps
 from .. import bot
 from ..console import logs
 
-START_IMAGE_URL = "ERAVIBES/resource/thumbnail.png"
+START_IMAGE_URL = "BRANDEDKING/assets/play_icons.png"
 
 
 async def download_thumbnail(vidid: str):
