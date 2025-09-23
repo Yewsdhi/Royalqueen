@@ -4,7 +4,7 @@ from io import BytesIO
 
 from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance, ImageOps
 
-from .. import bot
+from .. import 
 from ..console import logs
 
 START_IMAGE_URL = "BRANDEDKING/assets/play_icons.png"
