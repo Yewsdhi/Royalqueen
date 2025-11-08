@@ -14,7 +14,7 @@ from BRANDEDKING.utils.formatters import time_to_seconds
 import random
 import logging
 import aiohttp
-from ShrutiMusic import LOGGER
+from BRANDEDKING import LOGGER
 from urllib.parse import urlparse
 
 YOUR_API_URL = None
