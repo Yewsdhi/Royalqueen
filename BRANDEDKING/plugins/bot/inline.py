@@ -5,8 +5,8 @@ from pyrogram.types import (
 )
 from py_yt import VideosSearch
 
-from AviaxMusic import app
-from AviaxMusic.utils.inlinequery import answer
+from BRANDEDKING import app
+from BRANDEDKING.utils.inlinequery import answer
 from config import BANNED_USERS
 
 
