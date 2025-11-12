@@ -3,7 +3,7 @@ import re
 import aiofiles
 import aiohttp
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
-from youtubesearchpython.__future__ import VideosSearch
+from py_yt import VideosSearch
 from config import YOUTUBE_IMG_URL
 
 # Constants
@@ -44,7 +44,7 @@ def trim_to_width(text: str, font: ImageFont.FreeTypeFont, max_w: int) -> str:
             return text[:i] + ellipsis
     return ellipsis
 
-async def get_thumb(videoid: str):
+async def gen_thumb(videoid: str):
     cache_path = os.path.join(CACHE_DIR, f"{videoid}_v4.png")
     if os.path.exists(cache_path):
         return cache_path
@@ -93,8 +93,8 @@ async def get_thumb(videoid: str):
     # Draw details
     draw = ImageDraw.Draw(bg)
     try:
-        title_font = ImageFont.truetype("BRANDEDKING/assets/font2.ttf", 32)
-        regular_font = ImageFont.truetype("BRANDEDKING/assets/font.ttf", 18)
+        title_font = ImageFont.truetype("AviaxMusic/assets/font2.ttf", 32)
+        regular_font = ImageFont.truetype("AviaxMusic/assets/font.ttf", 18)
     except OSError:
         title_font = regular_font = ImageFont.load_default()
 
@@ -116,7 +116,7 @@ async def get_thumb(videoid: str):
     draw.text((BAR_X + BAR_TOTAL_LEN - (90 if is_live else 60), BAR_Y + 15), end_text, fill="red" if is_live else "black", font=regular_font)
 
     # Icons
-    icons_path = "BRANDEDKING/assets/play_icons.png"
+    icons_path = "AviaxMusic/assets/play_icons.png"
     if os.path.isfile(icons_path):
         ic = Image.open(icons_path).resize((ICONS_W, ICONS_H)).convert("RGBA")
         r, g, b, a = ic.split()
