@@ -21,8 +21,7 @@ YOUR_API_URL = None
 
 async def load_api_url():
     global YOUR_API_URL
-    logger = LOGGER("BRANDEDKING.platforms.Youtube.py")
-    ")
+    logger = LOGGER("ShrutiMusic.platforms.Youtube.py")
     
     try:
         async with aiohttp.ClientSession() as session:
