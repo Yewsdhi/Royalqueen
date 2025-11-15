@@ -8,8 +8,8 @@ import yt_dlp
 from pyrogram.enums import MessageEntityType
 from pyrogram.types import Message
 from py_yt import VideosSearch
-from AviaxMusic.utils.database import is_on_off
-from AviaxMusic.utils.formatters import time_to_seconds
+from BRANDEDKING.utils.database import is_on_off
+from BRANDEDKING.utils.formatters import time_to_seconds
 import os
 import glob
 import random
